@@ -1,5 +1,5 @@
 import { parseCsvRows, removeFormulaGuard } from './csv';
-import type { ExportRecord, ParsedExport, Thread } from './types';
+import type { CommentState, ExportRecord, ParsedExport, Source, Thread } from './types';
 
 // Reads the JSON and CSV files the Comment Scraper extension writes. Both JSON shapes carry
 // an envelope ({ generator: "Comment Scraper", threads: [...] }): the flat one lists every
@@ -92,17 +92,24 @@ function flattenNested(roots: unknown[]): unknown[] | null {
 
 const stringOr = <T>(value: unknown, fallback: T): string | T => (typeof value === 'string' ? value : fallback);
 
+const isSource = (value: unknown): value is Source => value === 'reddit' || value === 'hn';
+
+/** Anything other than the three states the extension writes is read as a normal comment. */
+const commentState = (value: unknown): CommentState =>
+	value === 'deleted' || value === 'removed' ? value : 'normal';
+
 /** Checks the fields the note needs. A row missing one of them means the file was cut off or edited. */
 function jsonRecord(row: unknown): ExportRecord | null {
 	if (!isObject(row)) return null;
 	const recordType = row.record_type;
 	if (recordType !== 'post' && recordType !== 'comment') return null;
 	if (recordType === 'comment' && typeof row.comment_id !== 'string') return null;
-	for (const field of ['source', 'thread_id', 'body', 'permalink', 'created_utc']) {
+	if (!isSource(row.source)) return null;
+	for (const field of ['thread_id', 'body', 'permalink', 'created_utc']) {
 		if (typeof row[field] !== 'string') return null;
 	}
 	return {
-		source: row.source as string,
+		source: row.source,
 		record_type: recordType,
 		thread_id: row.thread_id as string,
 		thread_title: stringOr(row.thread_title, ''),
@@ -117,28 +124,37 @@ function jsonRecord(row: unknown): ExportRecord | null {
 		is_op: row.is_op === true,
 		body: row.body as string,
 		permalink: row.permalink as string,
-		comment_state: stringOr(row.comment_state, 'normal'),
+		comment_state: commentState(row.comment_state),
 	};
 }
 
 function parseCsvExport(text: string): ParsedExport {
-	const [header, ...rows] = parseCsvRows(text);
-	const columns = new Map((header ?? []).map((name, index) => [name.trim(), index]));
+	const [header = [], ...rows] = parseCsvRows(text);
+	const columns = new Map(header.map((name, index) => [name.trim(), index]));
 	if (CSV_REQUIRED_COLUMNS.some((name) => !columns.has(name))) {
 		throw new NotAnExportError('not a Comment Scraper CSV export');
 	}
 	// A batch export puts several threads in one file, one after another.
-	const groups = new Map<string, { records: ExportRecord[]; fetchedAt: string }>();
+	const groups = new Map<string, { records: ExportRecord[]; fetchedAt: string; damaged: boolean }>();
 	for (const row of rows) {
 		if (row.length === 1 && row[0] === '') continue;
 		const cell = (name: string): string => {
 			const index = columns.get(name);
 			return index === undefined ? '' : removeFormulaGuard(row[index] ?? '');
 		};
+		const source = cell('source');
 		const recordType = cell('record_type');
-		if (recordType !== 'post' && recordType !== 'comment') continue;
+		const key = `${source}:${cell('thread_id')}`;
+		const group = groups.get(key) ?? { records: [], fetchedAt: cell('fetched_at'), damaged: false };
+		groups.set(key, group);
+		// Every row the extension writes has a cell for every column. A short or long row means
+		// the file was cut off or edited, and its comment can't be trusted to be whole.
+		if (row.length !== header.length || !isSource(source) || (recordType !== 'post' && recordType !== 'comment')) {
+			group.damaged = true;
+			continue;
+		}
 		const record: ExportRecord = {
-			source: cell('source'),
+			source,
 			record_type: recordType,
 			thread_id: cell('thread_id'),
 			thread_title: cell('thread_title'),
@@ -153,17 +169,14 @@ function parseCsvExport(text: string): ParsedExport {
 			is_op: cell('is_op') === 'true',
 			body: cell('body'),
 			permalink: cell('permalink'),
-			comment_state: cell('comment_state') || 'normal',
+			comment_state: commentState(cell('comment_state')),
 		};
-		const key = `${record.source}:${record.thread_id}`;
-		const group = groups.get(key) ?? { records: [], fetchedAt: cell('fetched_at') };
 		group.records.push(record);
-		groups.set(key, group);
 	}
 	const threads: Thread[] = [];
 	let skipped = 0;
-	for (const { records, fetchedAt } of groups.values()) {
-		const thread = buildThread(records, fetchedAt);
+	for (const { records, fetchedAt, damaged } of groups.values()) {
+		const thread = damaged ? null : buildThread(records, fetchedAt);
 		if (thread) threads.push(thread);
 		else skipped++;
 	}

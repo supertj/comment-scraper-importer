@@ -96,15 +96,39 @@ describe('parseExport', () => {
 	});
 
 	it('flattens a nested reply chain thousands deep without running out of stack', () => {
+		// Written as text: JSON.stringify itself recurses and overflows on deep nesting under Node 22.
+		const depth = 5_000;
 		const data = JSON.parse(fixture('batch-nested.json'));
-		const thread = data.threads[1];
-		const template = thread.comments[0];
-		let deepest = { ...template, replies: [] };
-		for (let index = 0; index < 20_000; index++) {
-			deepest = { ...template, comment_id: `d${index}`, replies: [deepest] };
-		}
-		thread.comments = [deepest];
-		expect(parseExport(JSON.stringify(data)).threads[1]!.comments).toHaveLength(20_001);
+		const { replies: _replies, ...template } = data.threads[1].comments[0];
+		const open = (index: number) => `${JSON.stringify({ ...template, comment_id: `d${index}` }).slice(0, -1)},"replies":[`;
+		let comments = '';
+		for (let index = 0; index < depth; index++) comments += open(index);
+		comments += ']}'.repeat(depth);
+		const text = `{"generator":"Comment Scraper","threads":[{"meta":${JSON.stringify(data.threads[1].meta)},"post":${JSON.stringify(data.threads[1].post)},"comments":[${comments}]}]}`;
+		expect(parseExport(text).threads[0]!.comments).toHaveLength(depth);
+	});
+
+	it('skips a CSV thread whose rows were cut off', () => {
+		const csv = fixture('batch.csv');
+		const cutInComment = csv.slice(0, csv.indexOf('Body of c1') + 4);
+		expect(parseExport(cutInComment)).toEqual({ threads: [], skipped: 1 });
+		const cutInPost = csv.slice(0, csv.indexOf('# not a heading'));
+		expect(parseExport(cutInPost)).toEqual({ threads: [], skipped: 1 });
+		// The Hacker News thread after a damaged Reddit thread still comes through.
+		const lines = csv.split('\r\n');
+		lines[3] = lines[3]!.split(',').slice(0, 10).join(',');
+		const { threads, skipped } = parseExport(lines.join('\r\n'));
+		expect(skipped).toBe(1);
+		expect(threads.map((thread) => thread.source)).toEqual(['hn']);
+	});
+
+	it('only accepts Reddit and Hacker News rows and the three comment states', () => {
+		const data = JSON.parse(fixture('batch-flat.json'));
+		for (const record of data.threads[1].records) record.source = 'Archive/x';
+		data.threads[0].records[1].comment_state = 'gone\n```dataviewjs';
+		const { threads, skipped } = parseExport(JSON.stringify(data));
+		expect(skipped).toBe(1);
+		expect(threads[0]!.comments[0]!.comment_state).toBe('normal');
 	});
 });
 

@@ -3,8 +3,11 @@
  * so JSON rows can be checked and used as they are. Exports never include usernames, so there
  * is no author field here either.
  */
+export type Source = 'reddit' | 'hn';
+export type CommentState = 'normal' | 'deleted' | 'removed';
+
 export interface ExportRecord {
-	source: string;
+	source: Source;
 	record_type: 'post' | 'comment';
 	thread_id: string;
 	thread_title: string;
@@ -26,12 +29,11 @@ export interface ExportRecord {
 	/** Empty for deleted and removed comments. */
 	body: string;
 	permalink: string;
-	/** "normal", "deleted" or "removed". */
-	comment_state: string;
+	comment_state: CommentState;
 }
 
 export interface Thread {
-	source: string;
+	source: Source;
 	threadId: string;
 	title: string;
 	url: string;
