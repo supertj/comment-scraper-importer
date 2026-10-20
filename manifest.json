@@ -1,0 +1,10 @@
+{
+	"id": "comment-scraper-importer",
+	"name": "Comment Scraper Importer",
+	"version": "1.0.0",
+	"minAppVersion": "1.1.13",
+	"description": "Import Reddit and Hacker News threads exported by the Comment Scraper browser extension as notes, with nested replies and each comment's score, time and link.",
+	"author": "Super Lede",
+	"authorUrl": "https://comment-scraper.com",
+	"isDesktopOnly": false
+}
