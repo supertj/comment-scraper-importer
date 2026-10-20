@@ -21,6 +21,9 @@ export interface ImportResult {
  */
 export async function importChosenFiles(app: App, files: ChosenFile[]): Promise<ImportResult> {
 	const folder = app.fileManager.getNewFileParent(app.workspace.getActiveFile()?.path ?? '');
+	// Lower-cased, because macOS and Windows treat "Thread.md" and "thread.md" as the same file
+	// while the vault lookup by path doesn't.
+	const taken = new Set(folder.children.map((child) => child.name.toLowerCase()));
 	const notes: TFile[] = [];
 	const problems: string[] = [];
 	for (const file of files) {
@@ -37,7 +40,9 @@ export async function importChosenFiles(app: App, files: ChosenFile[]): Promise<
 		for (const thread of parsed.threads) {
 			const name = noteFileName(thread);
 			try {
-				notes.push(await app.vault.create(freePath(app, folder.path, name), threadToNote(thread)));
+				const fileName = freeFileName(taken, name);
+				notes.push(await app.vault.create(normalizePath(`${folder.path}/${fileName}`), threadToNote(thread)));
+				taken.add(fileName.toLowerCase());
 			} catch (error) {
 				problems.push(`${name}: ${errorText(error)}.`);
 			}
@@ -46,10 +51,10 @@ export async function importChosenFiles(app: App, files: ChosenFile[]): Promise<
 	return { notes, folderPath: folder.path, problems };
 }
 
-function freePath(app: App, folderPath: string, name: string): string {
+function freeFileName(taken: Set<string>, name: string): string {
 	for (let copy = 0; ; copy++) {
-		const path = normalizePath(`${folderPath}/${copy === 0 ? name : `${name} ${copy}`}.md`);
-		if (!app.vault.getAbstractFileByPath(path)) return path;
+		const fileName = `${copy === 0 ? name : `${name} ${copy}`}.md`;
+		if (!taken.has(fileName.toLowerCase())) return fileName;
 	}
 }
 

@@ -75,6 +75,12 @@ describe('parseExport', () => {
 		expect(thread!.comments[1]).toMatchObject({ body: "'quoted on purpose", parent_missing: true });
 	});
 
+	it("can't tell a guard from a comment that really began with '- (CSV only; JSON is exact)", () => {
+		// The extension writes "'- x" both for "- x" (guarded) and for "'- x" (left alone), so the
+		// far more common first case wins. The README points people who need exact text to JSON.
+		expect(removeFormulaGuard("'- literal apostrophe")).toBe('- literal apostrophe');
+	});
+
 	it('rejects files that are not Comment Scraper exports', () => {
 		expect(() => parseExport('{"threads": []}')).toThrow(NotAnExportError);
 		expect(() => parseExport('{"generator": "Comment Scraper", "threads": [')).toThrow(NotAnExportError);
@@ -122,6 +128,14 @@ describe('parseExport', () => {
 		expect(threads.map((thread) => thread.source)).toEqual(['hn']);
 	});
 
+	it('skips the thread whose last cell opens a quote that never closes', () => {
+		// Same number of cells as a good row, but the quote has swallowed the end of the file.
+		const csv = fixture('batch.csv').trimEnd().replace(/,(2026-10-20T15:33:04\.870Z)$/, ',"$1');
+		const { threads, skipped } = parseExport(csv);
+		expect(skipped).toBe(1);
+		expect(threads.map((thread) => thread.source)).toEqual(['reddit']);
+	});
+
 	it('only accepts Reddit and Hacker News rows and the three comment states', () => {
 		const data = JSON.parse(fixture('batch-flat.json'));
 		for (const record of data.threads[1].records) record.source = 'Archive/x';
@@ -134,11 +148,15 @@ describe('parseExport', () => {
 
 describe('CSV helpers', () => {
 	it('splits quoted cells with commas, quotes and line breaks', () => {
-		expect(parseCsvRows('a,"b, ""c""\r\nd",e\r\nf,,\r\n')).toEqual([
-			['a', 'b, "c"\r\nd', 'e'],
-			['f', '', ''],
-		]);
-		expect(parseCsvRows('x,y')).toEqual([['x', 'y']]);
+		expect(parseCsvRows('a,"b, ""c""\r\nd",e\r\nf,,\r\n')).toEqual({
+			rows: [
+				['a', 'b, "c"\r\nd', 'e'],
+				['f', '', ''],
+			],
+			unterminated: false,
+		});
+		expect(parseCsvRows('x,y')).toEqual({ rows: [['x', 'y']], unterminated: false });
+		expect(parseCsvRows('x,"y\r\nz,w')).toEqual({ rows: [['x', 'y\r\nz,w']], unterminated: true });
 	});
 
 	it('only removes a guard the extension could have added', () => {

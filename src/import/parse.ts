@@ -129,14 +129,14 @@ function jsonRecord(row: unknown): ExportRecord | null {
 }
 
 function parseCsvExport(text: string): ParsedExport {
-	const [header = [], ...rows] = parseCsvRows(text);
+	const { rows: [header = [], ...rows], unterminated } = parseCsvRows(text);
 	const columns = new Map(header.map((name, index) => [name.trim(), index]));
 	if (CSV_REQUIRED_COLUMNS.some((name) => !columns.has(name))) {
 		throw new NotAnExportError('not a Comment Scraper CSV export');
 	}
 	// A batch export puts several threads in one file, one after another.
 	const groups = new Map<string, { records: ExportRecord[]; fetchedAt: string; damaged: boolean }>();
-	for (const row of rows) {
+	for (const [index, row] of rows.entries()) {
 		if (row.length === 1 && row[0] === '') continue;
 		const cell = (name: string): string => {
 			const index = columns.get(name);
@@ -149,7 +149,8 @@ function parseCsvExport(text: string): ParsedExport {
 		groups.set(key, group);
 		// Every row the extension writes has a cell for every column. A short or long row means
 		// the file was cut off or edited, and its comment can't be trusted to be whole.
-		if (row.length !== header.length || !isSource(source) || (recordType !== 'post' && recordType !== 'comment')) {
+		const cutOff = unterminated && index === rows.length - 1;
+		if (cutOff || row.length !== header.length || !isSource(source) || (recordType !== 'post' && recordType !== 'comment')) {
 			group.damaged = true;
 			continue;
 		}

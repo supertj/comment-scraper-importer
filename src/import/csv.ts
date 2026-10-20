@@ -1,5 +1,9 @@
-/** Splits RFC 4180 CSV into rows of cells. Quoted cells may contain commas, quotes and line breaks. */
-export function parseCsvRows(text: string): string[][] {
+/**
+ * Splits RFC 4180 CSV into rows of cells. Quoted cells may contain commas, quotes and line breaks.
+ * `unterminated` is set when the text ends inside a quoted cell: that cell has swallowed everything
+ * after it, so the last row can't be trusted.
+ */
+export function parseCsvRows(text: string): { rows: string[][]; unterminated: boolean } {
 	const rows: string[][] = [];
 	let row: string[] = [];
 	let cell = '';
@@ -24,11 +28,11 @@ export function parseCsvRows(text: string): string[][] {
 			cell = '';
 		} else cell += char;
 	}
-	if (cell !== '' || row.length > 0) {
+	if (cell !== '' || row.length > 0 || quoted) {
 		row.push(cell);
 		rows.push(row);
 	}
-	return rows;
+	return { rows, unterminated: quoted };
 }
 
 /**
