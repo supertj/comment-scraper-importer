@@ -50,6 +50,7 @@ A few details:
 - Replies more than six levels deep stay at the sixth level and say which comment they answer, so long back-and-forths stay readable.
 - Deleted and removed comments keep their place in the thread, marked *(deleted)* or *(removed)*.
 - Author names aren't included, because the extension doesn't export them. A username someone typed into their comment stays in the text.
+- JSON keeps comment text exactly. In CSV, the extension puts a ' in front of text that starts with =, +, - or @ so spreadsheets don't treat it as a formula, and the plugin takes it off again. A comment that really did start with something like '- loses that apostrophe, so use JSON if that matters.
 
 The Markdown export isn't supported: it has no links to individual comments, and its times are relative ("3d ago"). It's already Markdown, though, so you can put it in your vault as it is.
 
